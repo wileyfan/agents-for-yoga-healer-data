@@ -1,0 +1,339 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://betwell.io/schemas/intake-card-v0.1.json",
+  "title": "Betwell Telegram AI 预问诊抽卡 typed schema v0.1",
+  "version": "0.1.0",
+  "created_at": "2026-06-03",
+  "anchors": {
+    "D-AG": "subject_id 必须显式传入 · 不能 LLM 推断",
+    "D-AH": "Harness workflow 可调用此 schema",
+    "D-AI": "每张卡 = 一个 typed object · 字段 / 类型 / 必填性显式 · LLM 输出必须可被 method 调用"
+  },
+  "description": "6 张固定卡组的 typed schema · MVP 版本 · 对应 betwell-telegram-ai-consultation-ui-v0.1.md §2",
+
+  "type": "object",
+  "required": ["session_id", "subject_id", "doctor_id_pending", "started_at", "cards", "completion_status"],
+  "properties": {
+    "session_id": {
+      "type": "string",
+      "pattern": "^IS-[0-9]{8}-[0-9]{4}$",
+      "description": "问诊会话 ID · 格式 IS-YYYYMMDD-NNNN(例:IS-20260603-0001)"
+    },
+    "subject_id": {
+      "type": "string",
+      "pattern": "^P-[0-9]{4,}$",
+      "description": "患者主体 ID · 锚 D-AG · 不能 LLM 推断 · 必须显式传入"
+    },
+    "doctor_id_pending": {
+      "type": ["string", "null"],
+      "pattern": "^D-[0-9]{4,}$",
+      "description": "预分配医师 ID · 完成预问诊后路由用 · null 表示未分配"
+    },
+    "service_context": {
+      "type": "string",
+      "enum": ["L2a_resort", "L3_independent_practitioner", "L1_general", "other"],
+      "default": "L2a_resort",
+      "description": "服务场景 · MVP 默认 L2a 度假村"
+    },
+    "started_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 UTC 时间 · 不允许 free text 时间"
+    },
+    "completed_at": {
+      "type": ["string", "null"],
+      "format": "date-time"
+    },
+    "completion_status": {
+      "type": "string",
+      "enum": ["consent_pending", "in_progress", "completed", "abandoned_timeout", "abandoned_by_user"],
+      "description": "完成状态 · abandoned_timeout = 24 小时未完成自动归档"
+    },
+    "privacy_consent": {
+      "type": "object",
+      "required": ["consented", "consented_at", "consent_version"],
+      "properties": {
+        "consented": {"type": "boolean"},
+        "consented_at": {"type": "string", "format": "date-time"},
+        "consent_version": {"type": "string", "description": "同意书版本 · 例 v0.1.0"}
+      }
+    },
+    "cards": {
+      "type": "object",
+      "required": ["C1_chief_complaint", "C2_symptom_quality", "C3_duration", "C4_associated_symptoms", "C5_medical_history", "C6_confirmation"],
+      "properties": {
+
+        "C1_chief_complaint": {
+          "type": "object",
+          "description": "卡 1 · 主诉部位 · 单选 + 逃生",
+          "required": ["card_id", "answered_at", "answer_type"],
+          "properties": {
+            "card_id": {"const": "C1"},
+            "answered_at": {"type": "string", "format": "date-time"},
+            "answer_type": {"enum": ["preset", "freeform"]},
+            "preset_value": {
+              "type": ["string", "null"],
+              "enum": ["head_neck", "chest_abdomen", "limbs", "sleep", "other_preset", null],
+              "description": "5 个预设部位"
+            },
+            "freeform_value": {
+              "type": ["string", "null"],
+              "maxLength": 200,
+              "description": "逃生文字 · 最长 200 字"
+            },
+            "method_hooks": {
+              "type": "array",
+              "items": {"type": "string"},
+              "default": ["route_to_specialty(value)", "log_to_audit(card_id, value)"],
+              "description": "可调用 method · 锚 D-AI"
+            }
+          }
+        },
+
+        "C2_symptom_quality": {
+          "type": "object",
+          "description": "卡 2 · 症状性质 · 单选 + 逃生",
+          "required": ["card_id", "answered_at", "answer_type"],
+          "properties": {
+            "card_id": {"const": "C2"},
+            "answered_at": {"type": "string", "format": "date-time"},
+            "answer_type": {"enum": ["preset", "freeform"]},
+            "preset_value": {
+              "type": ["string", "null"],
+              "enum": ["zhang_distension", "tong_pain", "ma_numbness", "yang_itch", "burning", null],
+              "description": "5 个性质 · 中医常用"
+            },
+            "freeform_value": {"type": ["string", "null"], "maxLength": 200}
+          }
+        },
+
+        "C3_duration": {
+          "type": "object",
+          "description": "卡 3 · 持续时间 · 单选(无逃生 · 时间字段必须 bucket)",
+          "required": ["card_id", "answered_at", "duration_bucket"],
+          "properties": {
+            "card_id": {"const": "C3"},
+            "answered_at": {"type": "string", "format": "date-time"},
+            "duration_bucket": {
+              "type": "string",
+              "enum": ["acute_today", "within_week", "within_month", "chronic_over_month"],
+              "description": "时间字段必须 typed bucket · 不允许 free text 例'下周三' · 锚 D-AI 工程后果时间字段"
+            }
+          }
+        },
+
+        "C4_associated_symptoms": {
+          "type": "object",
+          "description": "卡 4 · 伴随症状 · 多选 + 逃生",
+          "required": ["card_id", "answered_at"],
+          "properties": {
+            "card_id": {"const": "C4"},
+            "answered_at": {"type": "string", "format": "date-time"},
+            "preset_values": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": ["fever", "insomnia", "appetite_loss", "nausea", "dizziness", "fatigue", "anxiety", "other_preset"]
+              },
+              "maxItems": 8,
+              "uniqueItems": true
+            },
+            "freeform_value": {"type": ["string", "null"], "maxLength": 300}
+          }
+        },
+
+        "C5_medical_history": {
+          "type": "object",
+          "description": "卡 5 · 既往史 + 用药 · 二级单选(无 / 有→自由文字)",
+          "required": ["card_id", "answered_at", "has_history"],
+          "properties": {
+            "card_id": {"const": "C5"},
+            "answered_at": {"type": "string", "format": "date-time"},
+            "has_history": {"type": "boolean"},
+            "history_text": {
+              "type": ["string", "null"],
+              "maxLength": 500,
+              "description": "既往史自由文字 · 若 has_history = true 必填"
+            },
+            "current_medications": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["name"],
+                "properties": {
+                  "name": {"type": "string"},
+                  "dosage": {"type": ["string", "null"]},
+                  "frequency": {"type": ["string", "null"]}
+                }
+              },
+              "default": [],
+              "description": "结构化药物 · LLM 从 history_text 提取 · validation 强制"
+            },
+            "allergies": {
+              "type": "array",
+              "items": {"type": "string"},
+              "default": []
+            }
+          }
+        },
+
+        "C6_confirmation": {
+          "type": "object",
+          "description": "卡 6 · 摘要确认 + 提交",
+          "required": ["card_id", "answered_at", "confirmed"],
+          "properties": {
+            "card_id": {"const": "C6"},
+            "answered_at": {"type": "string", "format": "date-time"},
+            "confirmed": {"type": "boolean"},
+            "edits_requested": {
+              "type": "array",
+              "items": {"enum": ["C1", "C2", "C3", "C4", "C5"]},
+              "default": [],
+              "description": "患者点[改]后回到的卡 · 不允许直接跳改 · 必须重走"
+            }
+          }
+        }
+      }
+    },
+
+    "progress": {
+      "type": "object",
+      "description": "进度条 · UI 显示用",
+      "properties": {
+        "completed_count": {"type": "integer", "minimum": 0, "maximum": 6},
+        "total": {"const": 6},
+        "estimated_minutes_remaining": {"type": "integer", "minimum": 0}
+      }
+    },
+
+    "ai_extraction_audit": {
+      "type": "object",
+      "description": "LLM 从 freeform 字段提取结构化数据的审计日志 · 锚 D-AI 决策 3 三段分离",
+      "properties": {
+        "extractions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["card_id", "raw_input", "extracted_fields", "model", "extracted_at"],
+            "properties": {
+              "card_id": {"type": "string"},
+              "raw_input": {"type": "string"},
+              "extracted_fields": {"type": "object"},
+              "model": {"type": "string", "description": "使用的 LLM model id"},
+              "extracted_at": {"type": "string", "format": "date-time"},
+              "validated_by_schema": {"type": "boolean", "description": "是否通过 schema validation"},
+              "validation_errors": {"type": "array", "items": {"type": "string"}, "default": []}
+            }
+          }
+        }
+      }
+    },
+
+    "soap_summary": {
+      "type": "object",
+      "description": "问诊结束生成的 SOAP 摘要 · LLM 生成 · 医师审核签字",
+      "properties": {
+        "S_subjective": {"type": "string", "maxLength": 1000},
+        "O_objective_pending": {"type": ["string", "null"], "description": "客观体征 · 医师后续填"},
+        "A_assessment_pending": {"type": ["string", "null"], "description": "评估 · 医师后续填"},
+        "P_plan_pending": {"type": ["string", "null"], "description": "计划 · 医师后续填"},
+        "generated_at": {"type": "string", "format": "date-time"},
+        "generated_by_model": {"type": "string"},
+        "doctor_signed_at": {"type": ["string", "null"], "format": "date-time"},
+        "doctor_signature_id": {"type": ["string", "null"]}
+      }
+    },
+
+    "telegram_metadata": {
+      "type": "object",
+      "description": "TG 侧元数据 · 不含 PHI · 锚:TG 仅传结构化字段 + subject_id · 完整 PHI 留后台",
+      "properties": {
+        "tg_user_id": {"type": "string"},
+        "tg_chat_id": {"type": "string"},
+        "bot_username": {"type": "string", "const": "@betwell_bot"},
+        "message_thread_ids": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "TG 消息 ID 链 · 用于审计 · 不含正文"
+        }
+      }
+    }
+  },
+
+  "examples": [
+    {
+      "session_id": "IS-20260603-0001",
+      "subject_id": "P-1234",
+      "doctor_id_pending": "D-5678",
+      "service_context": "L2a_resort",
+      "started_at": "2026-06-03T09:35:00Z",
+      "completed_at": "2026-06-03T09:42:00Z",
+      "completion_status": "completed",
+      "privacy_consent": {
+        "consented": true,
+        "consented_at": "2026-06-03T09:34:50Z",
+        "consent_version": "v0.1.0"
+      },
+      "cards": {
+        "C1_chief_complaint": {
+          "card_id": "C1",
+          "answered_at": "2026-06-03T09:35:30Z",
+          "answer_type": "preset",
+          "preset_value": "head_neck",
+          "freeform_value": null
+        },
+        "C2_symptom_quality": {
+          "card_id": "C2",
+          "answered_at": "2026-06-03T09:36:10Z",
+          "answer_type": "preset",
+          "preset_value": "zhang_distension",
+          "freeform_value": null
+        },
+        "C3_duration": {
+          "card_id": "C3",
+          "answered_at": "2026-06-03T09:36:45Z",
+          "duration_bucket": "within_week"
+        },
+        "C4_associated_symptoms": {
+          "card_id": "C4",
+          "answered_at": "2026-06-03T09:38:20Z",
+          "preset_values": ["insomnia"],
+          "freeform_value": "颈部僵硬"
+        },
+        "C5_medical_history": {
+          "card_id": "C5",
+          "answered_at": "2026-06-03T09:40:30Z",
+          "has_history": true,
+          "history_text": "高血压 5 年 · 服氨氯地平 5mg 每日 1 次",
+          "current_medications": [
+            {"name": "氨氯地平", "dosage": "5mg", "frequency": "每日 1 次"}
+          ],
+          "allergies": []
+        },
+        "C6_confirmation": {
+          "card_id": "C6",
+          "answered_at": "2026-06-03T09:42:00Z",
+          "confirmed": true,
+          "edits_requested": []
+        }
+      },
+      "progress": {"completed_count": 6, "total": 6, "estimated_minutes_remaining": 0},
+      "soap_summary": {
+        "S_subjective": "患者头部胀痛持续一周 · 伴失眠 · 颈部僵硬 · 既往高血压 5 年服氨氯地平",
+        "O_objective_pending": null,
+        "A_assessment_pending": null,
+        "P_plan_pending": null,
+        "generated_at": "2026-06-03T09:42:15Z",
+        "generated_by_model": "gpt-5",
+        "doctor_signed_at": null,
+        "doctor_signature_id": null
+      },
+      "telegram_metadata": {
+        "tg_user_id": "123456789",
+        "tg_chat_id": "987654321",
+        "bot_username": "@betwell_bot",
+        "message_thread_ids": ["msg_001", "msg_002", "msg_003", "msg_004", "msg_005", "msg_006"]
+      }
+    }
+  ]
+}
