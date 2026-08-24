@@ -7,3 +7,8 @@
 *.docx
 *.doc
 */images/
+
+# 原书扫描/版权文件仅本地
+ACSM*/
+yoga_therapy_data_package.zip
+.DS_Store
